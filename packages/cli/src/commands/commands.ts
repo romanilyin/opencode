@@ -112,6 +112,33 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
         param: Flag.KeyValuePair("param").pipe(Flag.withDescription("OpenAPI path or query parameter"), Flag.optional),
       },
     }),
+    Spec.make("db", {
+      description: "Inspect and maintain an explicitly selected database file",
+      commands: [
+        Spec.make("inspect", {
+          description: "Read database allocation and retained event sizes without migrations",
+          params: { path: Argument.String("path").pipe(Argument.withDescription("Existing database file")) },
+        }),
+        Spec.make("backup", {
+          description: "Create and verify a consistent recovery copy including committed WAL data",
+          params: {
+            path: Argument.String("path").pipe(Argument.withDescription("Existing database file")),
+            target: Argument.String("target").pipe(Argument.withDescription("New recovery-copy path")),
+          },
+        }),
+        Spec.make("vacuum", {
+          description: "Reclaim free pages in an offline database after creating a verified recovery copy",
+          params: {
+            path: Argument.String("path").pipe(Argument.withDescription("Existing offline database file")),
+            target: Argument.String("target").pipe(Argument.withDescription("New recovery-copy path")),
+            apply: Flag.Boolean("apply").pipe(
+              Flag.withDescription("Apply VACUUM; stop all servers using this database first"),
+              Flag.withDefault(false),
+            ),
+          },
+        }),
+      ],
+    }),
     Spec.make("debug", {
       description: "Debugging and troubleshooting tools",
       commands: [
