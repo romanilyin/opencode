@@ -59,6 +59,8 @@ const isTransient = (error: unknown) =>
 
 export type { GetPromptResult, Prompt, ReadResourceResult, Resource, Tool }
 export type ResourceTemplate = ResourceTemplateType
+export type ServerInfo = Implementation
+export type Progress = { readonly progress: number; readonly total?: number; readonly message?: string }
 
 export class NeedsAuthError extends Schema.TaggedError<NeedsAuthError>()("MCP.NeedsAuthError", {
   server: Schema.String,
@@ -87,6 +89,7 @@ export interface CallToolResult {
   readonly isError: boolean
   readonly structured?: unknown
   readonly content: ReadonlyArray<CallToolContent>
+  readonly meta?: Record<string, unknown>
 }
 
 export type ElicitationFormParams = ElicitRequestFormParams
@@ -114,6 +117,7 @@ export interface ElicitationHandler {
 export interface Connection {
   /** True when the connection negotiated revision 2026-07-28 or later; false is the initialize handshake. */
   readonly modern: boolean
+  readonly serverInfo?: ServerInfo
   readonly instructions: string | undefined
   readonly tools: () => Effect.Effect<Tool[], Error>
   readonly prompts: () => Effect.Effect<Prompt[], Error>
@@ -129,6 +133,7 @@ export interface Connection {
     readonly name: string
     readonly args?: Record<string, unknown>
     readonly sessionID?: Session.ID
+    readonly onProgress?: (update: Progress) => void
   }) => Effect.Effect<CallToolResult, Error>
   readonly onClose: (callback: (reason: string) => void) => void
   readonly onSessionExpired: (callback: () => void) => void
@@ -329,6 +334,7 @@ export const connect = Effect.fnUntraced(function* (
 
     return {
       modern: client.getProtocolEra() === "modern",
+      serverInfo: client.getServerVersion(),
       instructions: client.getInstructions()?.trim() || undefined,
       tools: () => list("list MCP tools", () => client.listTools(undefined, catalog)).pipe(Effect.map((r) => r.tools)),
       prompts: () =>
@@ -350,17 +356,21 @@ export const connect = Effect.fnUntraced(function* (
           client.getPrompt({ name: input.name, arguments: input.args ?? {} }, { signal, timeout: execution }),
         ),
       callTool: (input) =>
-        request("call MCP tool", (signal) =>
-          client.callTool(
+        request("call MCP tool", async (signal) => {
+          let active = true
+          try { return await client.callTool(
             {
               name: input.name,
               arguments: input.args ?? {},
               ...(input.sessionID === undefined ? {} : { _meta: { "ai.opencode/sessionID": input.sessionID } }),
             },
             // Requesting progress keeps long calls alive under the SDK's timeout; execution is the hard wall.
-            { signal, timeout: execution, onprogress: () => {} },
-          ),
-        ).pipe(Effect.map(toCallToolResult)),
+            { signal, timeout: execution, onprogress: (update) => {
+              if (!active || signal.aborted) return
+              try { void Promise.resolve(input.onProgress?.(update)).catch(() => {}) } catch {}
+            } },
+          ) } finally { active = false }
+        }).pipe(Effect.map(toCallToolResult)),
       onClose: (callback) => {
         client.onclose = () => callback(lastError ? `Connection closed: ${lastError}` : "Connection closed")
       },
@@ -400,6 +410,7 @@ function toCallToolResult(result: SdkCallToolResult): CallToolResult {
   return {
     isError: result.isError === true,
     structured: result.structuredContent,
+    ...(result._meta === undefined ? {} : { meta: result._meta }),
     content: result.content.flatMap((part): CallToolContent[] => {
       if (part.type === "text") return [{ type: "text", text: part.text }]
       if (part.type === "image" || part.type === "audio")

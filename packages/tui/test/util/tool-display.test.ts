@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import {
   canonicalToolName,
+  executeCalls,
+  executeCallKey,
+  executeCallSummary,
   finiteNumber,
   primitiveInputSummary,
   toolDisplayMetadata,
+  toolPresentationSummary,
   webSearchProviderLabel,
 } from "../../src/util/tool-display"
 
@@ -17,6 +21,60 @@ test("normalizes shared tool primitives", () => {
   expect([finiteNumber(-1.5), finiteNumber(Number.NaN), finiteNumber("1")]).toEqual([-1.5, undefined, undefined])
   expect(primitiveInputSummary({ command: "pwd", count: 2, nested: {} })).toBe("[command=pwd, count=2]")
   expect(primitiveInputSummary({ path: "src/a.ts", line: 2 }, ["path"])).toBe("[line=2]")
+})
+
+describe("tool presentation", () => {
+  test("shows safe text and progress at every state while retaining unknown metadata fallback", () => {
+    expect(
+      toolPresentationSummary(
+        {
+          toolPresentation: {
+            schemaVersion: 1,
+            label: "\u001b[31mLookup\u001b[0m\nready",
+            detail: "Second phase",
+            progress: { current: 2, total: 5 },
+          },
+        },
+        "acme.lookup",
+      ),
+    ).toBe("Lookup ready · Second phase · 2 / 5")
+    expect(
+      toolPresentationSummary(
+        { toolPresentation: { schemaVersion: 7, label: "untrusted" } },
+        "acme.lookup [name=first]",
+      ),
+    ).toBe("acme.lookup [name=first]")
+    expect(toolPresentationSummary({ toolPresentation: { schemaVersion: 1, label: {} } }, "fallback")).toBe("fallback")
+  })
+
+  test("retains IDs, arguments and canonical errors when repeated calls complete in reverse order", () => {
+    const rows = executeCalls([
+      {
+        id: "second",
+        tool: "acme.lookup",
+        status: "error",
+        input: { name: "second" },
+        metadata: {
+          toolPresentation: { schemaVersion: 1, label: "Second lookup", detail: "Completed according to label" },
+        },
+      },
+      {
+        id: "first",
+        tool: "acme.lookup",
+        status: "running",
+        input: { name: "first" },
+        metadata: { toolPresentation: { schemaVersion: 1, label: "First lookup", progress: { current: 1 } } },
+      },
+      { tool: "acme.lookup", status: "completed", input: { name: "old" } },
+    ])
+    expect(rows.map(executeCallKey)).toEqual(["id:second", "id:first", "legacy:2"])
+    expect(rows[0]).toMatchObject({ id: "second", status: "error", input: { name: "second" } })
+    expect(rows.map(executeCallSummary)).toEqual([
+      "Second lookup · Completed according to label",
+      "First lookup · 1",
+      "acme.lookup [name=old]",
+    ])
+  })
 })
 
 describe("webSearchProviderLabel", () => {

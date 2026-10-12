@@ -170,6 +170,85 @@
   }
 }
 
+[data-component="tool-presentation-icon"] {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+[data-component="tool-presentation-details"] {
+  display: flex;
+  min-width: 0;
+  gap: 8px;
+  font-size: 13px;
+  line-height: var(--line-height-compact);
+  color: var(--v2-text-text-muted);
+
+  [data-slot="tool-presentation-detail"] {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  [data-slot="tool-presentation-progress"] {
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+[data-slot="generic-tool-input"],
+[data-slot="generic-tool-output"] {
+  margin: 0;
+  padding: 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: var(--line-height-compact);
+}
+
+[data-component="execute-tool-calls"] {
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: var(--line-height-compact);
+
+  [role="listitem"] {
+    padding: 4px 0;
+  }
+
+  [data-slot="execute-tool-call-header"] {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  [data-slot="execute-tool-call-label"] {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  [data-slot="execute-tool-call-status"] {
+    color: var(--v2-text-text-muted);
+    flex-shrink: 0;
+  }
+
+  [data-status="error"] [data-slot="execute-tool-call-status"] {
+    color: var(--v2-state-fg-danger);
+  }
+
+  [data-slot="execute-tool-call-name"],
+  [data-slot="execute-tool-call-input"] {
+    display: block;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--v2-text-text-muted);
+  }
+}
+
 [data-component="collapsible"].tool-collapsible[data-compact="true"] > [data-slot="collapsible-trigger"] {
   height: 28px;
 

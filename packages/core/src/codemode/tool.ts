@@ -14,6 +14,8 @@ import { Effect, Ref, Schema, Semaphore } from "effect"
 import { definition, normalizedName } from "../tool/runtime.js"
 import { CodeModeCatalog } from "./catalog.js"
 import { CodeModeWeb } from "./web.js"
+import { ToolProgress } from "../tool/progress.js"
+import { ToolPresentation } from "@opencode/util/tool-presentation"
 
 const ExecuteFile = Schema.Struct({
   data: Schema.String,
@@ -22,9 +24,11 @@ const ExecuteFile = Schema.Struct({
 })
 
 const ExecuteCall = Schema.Struct({
+  id: Schema.String,
   tool: Schema.String,
   status: Schema.Literals(["running", "completed", "error"]),
   input: Schema.optionalKey(Schema.Record(Schema.String, Schema.Json)),
+  metadata: Schema.optionalKey(Schema.Record(Schema.String, Schema.Json)),
 })
 
 type ExecuteCall = typeof ExecuteCall.Type
@@ -85,14 +89,23 @@ export const create = (
         const lock = Semaphore.makeUnsafe(1)
         const record = (update: (items: Array<ExecuteCall>) => Array<ExecuteCall>) =>
           lock.withPermit(
-            Ref.updateAndGet(calls, update).pipe(Effect.tap((toolCalls) => context.progress({ toolCalls }))),
+            Ref.updateAndGet(calls, update).pipe(Effect.tap((toolCalls) => ToolProgress.publish(context, { toolCalls }))),
           )
+        const collector = progressHooks(record, context.id)
         const result = yield* runtime(
           inventory,
-          (name, tool, input) =>
+          (name, tool, input, call) =>
             Effect.gen(function* () {
               const index = yield* Ref.getAndUpdate(callIndex, (index) => index + 1)
-              const executed = yield* executeTool(name, tool, input, context)
+              let active = true
+              const inner = { ...context, progress: (metadata: Metadata) => Effect.suspend(() =>
+                active && call ? collector.update(call, metadata) : Effect.void,
+              ) }
+              const executed = yield* executeTool(name, tool, input, inner).pipe(
+                Effect.tap((result) => call && result.metadata ? collector.update(call, result.metadata) : Effect.void),
+                Effect.catchTag("Tool.Error", (error) => (call && error.metadata ? collector.update(call, error.metadata) : Effect.void).pipe(Effect.andThen(error))),
+                Effect.ensuring(Effect.sync(() => { active = false })),
+              )
               const content =
                 typeof executed.content === "string"
                   ? [{ type: "text" as const, text: executed.content }]
@@ -104,7 +117,7 @@ export const create = (
               const text = content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n")
               return text === "" ? null : text
             }),
-          progressHooks(record),
+          collector.hooks,
         ).execute(code)
         const toolCalls = yield* Ref.get(calls)
         const collected = (yield* Ref.get(files))
@@ -140,12 +153,12 @@ export const create = (
 }
 
 // Rows appear in start order; the same call object arrives at both hooks, so a call finds its row again.
-function progressHooks(record: (update: (items: Array<ExecuteCall>) => Array<ExecuteCall>) => Effect.Effect<unknown>) {
+function progressHooks(record: (update: (items: Array<ExecuteCall>) => Array<ExecuteCall>) => Effect.Effect<unknown>, parentID: string) {
   const rows = new WeakMap<object, number>()
-  const start = (call: object, entry: ExecuteCall) =>
+  const start = (call: object, entry: Omit<ExecuteCall, "id">) =>
     record((items) => {
       rows.set(call, items.length)
-      return [...items, entry]
+      return [...items, { ...entry, id: `${parentID}/${items.length}` }]
     })
   const settle = (call: object, result: CodeMode.CallResult) => {
     const index = rows.get(call)
@@ -156,7 +169,7 @@ function progressHooks(record: (update: (items: Array<ExecuteCall>) => Array<Exe
       return next
     })
   }
-  return {
+  const hooks = {
     "tool.before": (call) => {
       const shown = displayInput(call.input)
       return start(call, { tool: call.name, status: "running", ...(shown ? { input: shown } : {}) })
@@ -173,6 +186,20 @@ function progressHooks(record: (update: (items: Array<ExecuteCall>) => Array<Exe
     },
     "extension.after": settle,
   } satisfies CodeMode.Hooks
+  return {
+    hooks,
+    update: (call: object, metadata: Metadata) => {
+      const index = rows.get(call)
+      const presentation = ToolPresentation.read(metadata)
+      if (index === undefined || !presentation) return Effect.void
+      return Effect.asVoid(record((items) => {
+        const row = items[index]
+        if (!row || row.status !== "running") return items
+        const merged = ToolProgress.merge(row.metadata, { toolPresentation: presentation })
+        return items.map((item, position) => position === index ? { ...item, metadata: merged as Record<string, typeof Schema.Json.Type> } : item)
+      }))
+    },
+  }
 }
 
 export const catalog = (inventory: Inventory) => {
@@ -220,7 +247,7 @@ function renderCatalog(root: CatalogNode): ReadonlyArray<CodeModeCatalog.Tool | 
 
 function runtime(
   inventory: Inventory,
-  executeTool: (name: string, tool: Info, input: unknown) => Effect.Effect<unknown, unknown>,
+  executeTool: (name: string, tool: Info, input: unknown, invocation?: Tool.Invocation) => Effect.Effect<unknown, unknown>,
   hooks?: CodeMode.Hooks,
 ) {
   // A path may carry namespace metadata, a callable tool, child tools, or all three.
@@ -232,7 +259,7 @@ function runtime(
       description: child.description,
       input: child.inputSchema,
       output: child.outputSchema ?? Schema.NullOr(Schema.String),
-      execute: (input) => executeTool(name, registration, input),
+      execute: (input, invocation) => executeTool(name, registration, input, invocation),
     })
   }
   const tools = renderTools(root)

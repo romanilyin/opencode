@@ -6,11 +6,14 @@ import { Icon } from "@opencode/ui/icon"
 import { IconButton } from "@opencode/ui/icon-button"
 import { Tooltip } from "@opencode/ui/tooltip"
 import { useI18n } from "@opencode/ui/context/i18n"
+import { ToolPresentation } from "@opencode/util/tool-presentation"
+import { ToolPresentationDetails, ToolPresentationIcon } from "./tool-presentation"
 
 export interface ToolErrorCardProps extends Omit<ComponentProps<typeof Card>, "children" | "variant"> {
   tool: string
   error: string
   title?: string
+  presentation?: ToolPresentation.Info
   defaultOpen?: boolean
   open?: boolean
   onOpenChange?: (open: boolean) => void
@@ -46,6 +49,7 @@ export function ToolErrorCard(props: ToolErrorCardProps) {
     "tool",
     "error",
     "title",
+    "presentation",
     "defaultOpen",
     "open",
     "onOpenChange",
@@ -62,6 +66,7 @@ export function ToolErrorCard(props: ToolErrorCardProps) {
   }
 
   const name = createMemo(() => {
+    if (split.presentation?.label) return split.presentation.label
     if (split.title) return split.title
 
     const map = new Map([
@@ -148,6 +153,7 @@ export function ToolErrorCard(props: ToolErrorCardProps) {
               <span data-slot="basic-tool-tool-indicator" data-component="tool-error-card-icon">
                 <Icon name="outline-hexagonal-warning" />
               </span>
+              <ToolPresentationIcon icon={split.presentation?.icon} />
               <div data-slot="basic-tool-tool-info">
                 <div data-slot="basic-tool-tool-info-structured">
                   <div data-slot="basic-tool-tool-info-main">
@@ -179,6 +185,7 @@ export function ToolErrorCard(props: ToolErrorCardProps) {
                     </Show>
                   </div>
                 </div>
+                <ToolPresentationDetails presentation={split.presentation} />
               </div>
             </div>
             <Collapsible.Arrow />

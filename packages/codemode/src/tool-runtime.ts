@@ -12,7 +12,7 @@ import {
   outputTypeScript,
 } from "./tool-schema.js"
 import { isNamespace, type Namespace } from "./namespace.js"
-import { isTool, type Tool } from "./tool.js"
+import { isTool, type Tool, type Invocation } from "./tool.js"
 import type { Tools } from "./tools.js"
 
 export const compareText = (left: string, right: string) => (left < right ? -1 : left > right ? 1 : 0)
@@ -37,7 +37,7 @@ export type ToolCall = {
 }
 
 /** A tool call the program is making, with its decoded input. */
-export type ToolInvocation = { readonly name: string; readonly input: unknown }
+export type ToolInvocation = Invocation
 
 /** A call the program is making to an extension global, with its arguments. */
 export type ExtensionInvocation = {
@@ -411,12 +411,13 @@ export const make = <R>(
           ),
       })
       yield* Effect.sync(() => recordCall({ name }))
+      const invocation = { name, input }
       return yield* hooked(
-        { name, input },
+        invocation,
         hooks["tool.before"],
         hooks["tool.after"],
         Effect.gen(function* () {
-          const raw = yield* Effect.suspend(() => tool.execute(input)).pipe(
+          const raw = yield* Effect.suspend(() => tool.execute(input, invocation)).pipe(
             Effect.catchCause((cause) => {
               if (Cause.hasInterruptsOnly(cause)) return Effect.interrupt
               return Effect.fail(

@@ -209,6 +209,10 @@ const source = {
   "ui.tool.skill": "Skill",
 
   "ui.basicTool.called": "Called `{{tool}}`",
+  "ui.tool.presentation.progress": "Tool progress",
+  "ui.tool.presentation.running": "Running",
+  "ui.tool.presentation.completed": "Completed",
+  "ui.tool.presentation.error": "Failed",
   "ui.toolErrorCard.failed": "Failed",
   "ui.toolErrorCard.copyError": "Copy error",
 

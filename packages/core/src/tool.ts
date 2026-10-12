@@ -16,6 +16,7 @@ import { SessionMessage } from "./session/message.js"
 import { SessionSchema } from "./session/schema.js"
 import { State } from "./state.js"
 import { definition, effectiveName, execute, normalizedName, normalizeContent } from "./tool/runtime.js"
+import { ToolProgress } from "./tool/progress.js"
 import { Wildcard } from "./util/wildcard.js"
 
 export class RegistrationError extends Schema.TaggedError<RegistrationError>()("Tool.RegistrationError", {
@@ -116,9 +117,25 @@ const layer = Layer.effect(
       input: unknown,
       context: Tool.Context,
     ) {
-      const execution = yield* execute(tool, input, context).pipe(
+      let progress: Tool.Metadata | undefined
+      let active = true
+      const scoped = {
+        ...context,
+        progress: (update: Tool.Metadata) =>
+          Effect.suspend(() => {
+            if (!active) return Effect.void
+            progress = ToolProgress.merge(progress, update)
+            return ToolProgress.publish(context, progress ?? {})
+          }),
+      }
+      const execution = yield* execute(tool, input, scoped).pipe(
         Effect.map((value) => ({ value })),
         Effect.catchTag("Tool.Error", (failure) => Effect.succeed({ failure })),
+        Effect.ensuring(
+          Effect.sync(() => {
+            active = false
+          }),
+        ),
       )
       const base = {
         tool: name,
@@ -132,18 +149,26 @@ const layer = Layer.effect(
         const afterEvent: PluginHooks.Domains["tool"]["execute.after"] = {
           ...base,
           status: "error",
-          error: execution.failure,
+          error:
+            progress === undefined
+              ? execution.failure
+              : new Tool.Error({
+                  message: execution.failure.message,
+                  error: execution.failure.error,
+                  metadata: ToolProgress.merge(progress, execution.failure.metadata),
+                }),
         }
         yield* hooks.trigger("tool", "execute.after", afterEvent)
         return yield* afterEvent.error
       }
+      const metadata = ToolProgress.merge(progress, execution.value.metadata)
       const afterEvent: PluginHooks.Domains["tool"]["execute.after"] = {
         ...base,
         status: "completed",
         result: {
           ...(execution.value.output === undefined ? {} : { output: execution.value.output }),
           content: execution.value.content,
-          ...(execution.value.metadata === undefined ? {} : { metadata: execution.value.metadata }),
+          ...(metadata === undefined ? {} : { metadata }),
         },
       }
       yield* hooks.trigger("tool", "execute.after", afterEvent)

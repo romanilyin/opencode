@@ -2367,6 +2367,7 @@ it.effect("forwards the invoking session through direct and Code Mode MCP tools"
       name: "lookup",
       args: {},
       sessionID: directSessionID,
+      onProgress: expect.any(Function),
     })
 
     const codeModeSessionID = Session.ID.make("ses_mcp_codemode")
@@ -2385,6 +2386,7 @@ it.effect("forwards the invoking session through direct and Code Mode MCP tools"
       name: "search",
       args: {},
       sessionID: codeModeSessionID,
+      onProgress: expect.any(Function),
     })
   }),
 )
@@ -2575,7 +2577,7 @@ it.effect("does not call MCP when permission is blocked", () =>
     })
     expect(execution.content).toEqual([{ type: "text", text: "Unable to execute demo_search" }])
     expect(execution.metadata).toEqual({
-      toolCalls: [{ tool: "demo.search", status: "error" }],
+      toolCalls: [{ id: "call_mcp_blocked/0", tool: "demo.search", status: "error", metadata: { toolPresentation: { schemaVersion: 1, label: "search" } } }],
       error: true,
     })
     expect(calls).toBe(0)

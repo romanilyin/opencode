@@ -4,7 +4,6 @@ import {
   createMemo,
   createSignal,
   For,
-  Index,
   Match,
   on,
   onCleanup,
@@ -50,6 +49,8 @@ import {
   canonicalToolName,
   executeCalls,
   executeCallSummary,
+  executeCallKey,
+  toolPresentationSummary,
   finiteNumber,
   primitiveInputSummary,
   toolDisplayContent,
@@ -1463,9 +1464,7 @@ export function Session(props: {
                   onMouseOut={() => setLatestHovered(false)}
                   onMouseUp={toBottom}
                 >
-                  <text
-                    fg={latestHovered() ? theme.text.action.secondary.hovered : theme.text.action.secondary.base}
-                  >
+                  <text fg={latestHovered() ? theme.text.action.secondary.hovered : theme.text.action.secondary.base}>
                     Jump to latest ↓
                   </text>
                 </box>
@@ -1511,12 +1510,7 @@ export function Session(props: {
                     }}
                   </Show>
                 </Match>
-                <Match
-                  when={
-                    session() &&
-                    currentLocation.error?.location.directory === session()!.location.directory
-                  }
-                >
+                <Match when={session() && currentLocation.error?.location.directory === session()!.location.directory}>
                   <SessionLocationMissing
                     directory={session()!.location.directory}
                     projectID={session()!.projectID}
@@ -2578,6 +2572,7 @@ function GenericTool(props: ToolProps) {
   const theme = useTheme()
   const output = createMemo(() => props.output?.trim() ?? "")
   const input = createMemo(() => Object.entries(props.input))
+  const summary = createMemo(() => toolPresentationSummary(props.metadata, genericToolSummary(props.tool, props.input)))
   const [expanded, setExpanded] = createSignal(false)
   const expandable = createMemo(() => input().length > 0 || output().length > 0)
   const loading = createMemo(() => props.part.state.status === "streaming" || props.part.state.status === "running")
@@ -2587,12 +2582,12 @@ function GenericTool(props: ToolProps) {
       <InlineTool
         icon={props.part.state.status === "error" ? "✗" : "✓"}
         complete={props.part.state.status === "completed"}
-        pending={props.tool}
+        pending={summary()}
         spinner={loading()}
         part={props.part}
         onClick={expandable() ? () => setExpanded((value) => !value) : undefined}
       >
-        {genericToolSummary(props.tool, props.input)}
+        {summary()}
       </InlineTool>
       <Show when={expanded()}>
         <box paddingLeft={3 + INLINE_TOOL_ICON_WIDTH}>
@@ -2772,9 +2767,7 @@ function BlockTool(props: BlockToolProps) {
               <Show
                 when={props.spinner}
                 fallback={
-                  <text
-                    fg={permission() ? theme.text.feedback.warning.base : (props.headerColor ?? theme.text.muted)}
-                  >
+                  <text fg={permission() ? theme.text.feedback.warning.base : (props.headerColor ?? theme.text.muted)}>
                     {title()}
                   </text>
                 }
@@ -2962,11 +2955,7 @@ function ShellDisplay(props: {
           <Show
             when={isRunning()}
             fallback={
-              <text
-                fg={theme.text.base}
-                wrapMode={expanded() ? "word" : "char"}
-                maxHeight={expanded() ? undefined : 2}
-              >
+              <text fg={theme.text.base} wrapMode={expanded() ? "word" : "char"} maxHeight={expanded() ? undefined : 2}>
                 {limitedInput()}
               </text>
             }
@@ -3067,7 +3056,9 @@ function Read(props: ToolProps) {
         Read {pathFormatter.format(stringValue(props.input.path))}
         <Show when={props.input.offset !== undefined || props.input.limit !== undefined}>
           :{finiteNumber(props.input.offset) || 1}-
-          {props.input.limit ? (finiteNumber(props.input.offset) || 1) + (finiteNumber(props.input.limit) || 0) - 1 : ""}
+          {props.input.limit
+            ? (finiteNumber(props.input.offset) || 1) + (finiteNumber(props.input.limit) || 0) - 1
+            : ""}
         </Show>
       </InlineTool>
       <For each={loaded()}>
@@ -3215,7 +3206,9 @@ function ExecuteCallView(props: { call: Accessor<ExecuteCall> }) {
           <text fg={color()}>{props.call().status === "error" ? "✗" : "›"}</text>
         </box>
         <text flexGrow={1} wrapMode="none" truncate fg={color()}>
-          {expanded() ? props.call().tool : executeCallSummary(props.call())}
+          {expanded()
+            ? toolPresentationSummary(props.call().metadata, props.call().tool)
+            : executeCallSummary(props.call())}
         </text>
       </box>
       <Show when={expanded()}>
@@ -3245,6 +3238,8 @@ function Execute(props: ToolProps) {
   const dialog = useDialog()
   const isLoading = createMemo(() => props.part.state.status === "streaming" || props.part.state.status === "running")
   const calls = createMemo(() => executeCalls(props.metadata.toolCalls))
+  const keys = createMemo(() => calls().map(executeCallKey))
+  const summary = createMemo(() => toolPresentationSummary(props.metadata, "execute"))
   const output = createMemo(() => stripAnsi(props.output?.trim() ?? ""))
   const hasRuntimeError = createMemo(() => props.metadata.error === true || props.part.state.status === "error")
   const outputPreview = createMemo(() => collapseToolOutput(output(), 4, 4 * Math.max(20, ctx.width - 6)).output)
@@ -3261,15 +3256,17 @@ function Execute(props: ToolProps) {
         icon={hasRuntimeError() ? "✗" : props.part.state.status === "completed" ? "✓" : "│"}
         color={hasRuntimeError() ? theme.text.feedback.error.base : undefined}
         spinner={isLoading()}
-        pending="execute"
+        pending={summary()}
         complete={true}
         part={props.part}
         onClick={openDetails}
         onErrorClick={openDetails}
       >
-        execute
+        {summary()}
       </InlineTool>
-      <Index each={calls()}>{(call) => <ExecuteCallView call={call} />}</Index>
+      <For each={keys()}>
+        {(key) => <ExecuteCallView call={() => calls().find((call, index) => executeCallKey(call, index) === key)!} />}
+      </For>
       <Show when={showOutput()}>
         <box paddingLeft={3}>
           <For each={outputPreview().split("\n")}>

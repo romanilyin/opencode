@@ -17,6 +17,8 @@ import { createStore } from "solid-js/store"
 import { Collapsible } from "@opencode/ui/collapsible"
 import type { IconProps } from "@opencode/ui/icon"
 import { TextShimmer } from "@opencode/ui/text-shimmer"
+import { ToolPresentation } from "@opencode/util/tool-presentation"
+import { ToolPresentationDetails, ToolPresentationIcon } from "./tool-presentation"
 
 export type TriggerTitle = {
   title: string
@@ -38,6 +40,7 @@ const isTriggerTitle = (val: unknown): val is TriggerTitle => {
 
 export interface BasicToolProps {
   icon: IconProps["name"]
+  presentation?: ToolPresentation.Info
   trigger: TriggerTitle | JSX.Element | ((open: Accessor<boolean>) => JSX.Element)
   children?: JSX.Element
   /** Declare known content without constructing lazy JSX to test its presence. */
@@ -232,6 +235,7 @@ export function BasicTool(props: BasicToolProps) {
       data-hide-details={props.hideDetails ? "true" : undefined}
     >
       <div data-slot="basic-tool-tool-trigger-content">
+        <ToolPresentationIcon icon={props.presentation?.icon} />
         <div data-slot="basic-tool-tool-info">
           <Switch>
             <Match when={triggerTitle()}>
@@ -288,6 +292,7 @@ export function BasicTool(props: BasicToolProps) {
             </Match>
             <Match when={true}>{triggerContent() as JSX.Element}</Match>
           </Switch>
+          <ToolPresentationDetails presentation={props.presentation} />
         </div>
       </div>
       <Show when={hasChildren() && !props.hideDetails && !props.locked && (!pending() || props.allowOpenWhilePending)}>
@@ -400,19 +405,38 @@ export function GenericTool(props: {
   status?: string
   hideDetails?: boolean
   input?: Record<string, unknown>
+  metadata?: Record<string, unknown>
+  output?: string
+  defaultOpen?: boolean
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  deferContent?: boolean
 }) {
   const i18n = useI18n()
+  const presentation = createMemo(() => ToolPresentation.read(props.metadata))
 
   return (
     <BasicTool
+      {...props}
       icon="mcp"
+      presentation={presentation()}
       status={props.status}
+      defer={props.deferContent}
+      hasContent={!!props.output || !!Object.keys(props.input ?? {}).length}
+      allowOpenWhilePending
       trigger={{
-        title: i18n.t("ui.basicTool.called", { tool: props.tool }),
-        subtitle: label(props.input),
+        title: presentation()?.label ?? i18n.t("ui.basicTool.called", { tool: props.tool }),
+        subtitle: presentation()?.detail ? undefined : label(props.input),
         args: args(props.input),
       }}
       hideDetails={props.hideDetails}
-    />
+    >
+      <Show when={Object.keys(props.input ?? {}).length}>
+        <pre data-slot="generic-tool-input">{JSON.stringify(props.input, null, 2)}</pre>
+      </Show>
+      <Show when={props.output}>
+        <pre data-slot="generic-tool-output">{props.output}</pre>
+      </Show>
+    </BasicTool>
   )
 }

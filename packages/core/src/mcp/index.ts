@@ -33,7 +33,7 @@ export interface ServerInstructions {
 }
 
 /** SDK tool definition tagged with the server that owns it. */
-export type Tool = McpClient.Tool & { readonly server: ServerName; readonly codemode?: boolean }
+export type Tool = McpClient.Tool & { readonly server: ServerName; readonly codemode?: boolean; readonly serverInfo?: McpClient.ServerInfo }
 export type ToolResultContent = McpClient.CallToolContent
 export type ToolResult = McpClient.CallToolResult & { readonly server: ServerName; readonly tool: string }
 export type Prompt = McpClient.Prompt & { readonly server: ServerName }
@@ -122,6 +122,7 @@ export interface Interface extends State.Transformable<Editor> {
     readonly name: string
     readonly args?: Record<string, unknown>
     readonly sessionID?: Session.ID
+    readonly onProgress?: (update: McpClient.Progress) => void
   }) => Effect.Effect<ToolResult, NotFoundError | ToolCallError>
   readonly instructions: () => Effect.Effect<ServerInstructions[]>
   readonly prompts: () => Effect.Effect<Prompt[]>
@@ -310,7 +311,7 @@ export const layer = (options?: Options) =>
       const refreshTools = (name: ServerName, entry: ServerEntry, connection: McpClient.Connection) =>
         connection.tools().pipe(
           Effect.map((tools) => {
-            entry.tools = tools.map((tool) => toTool(name, entry, tool))
+            entry.tools = tools.map((tool) => ({ ...toTool(name, entry, tool), ...(connection.serverInfo ? { serverInfo: connection.serverInfo } : {}) }))
           }),
         )
 
@@ -676,7 +677,7 @@ export const layer = (options?: Options) =>
               message: unavailable(target.name, target.entry.status),
             })
           const result = yield* recovering(target.name, target.entry, target.entry.client, (connection) =>
-            connection.callTool({ name: input.name, args: input.args, sessionID: input.sessionID }),
+            connection.callTool({ name: input.name, args: input.args, sessionID: input.sessionID, onProgress: input.onProgress }),
           ).pipe(
             Effect.mapError(
               (error) =>

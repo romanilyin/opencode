@@ -4,17 +4,33 @@ import { ToolFailure } from "@opencode/ai"
 import { McpEvent } from "@opencode/schema/mcp-event"
 import { Context, Effect, Fiber, type JsonSchema, Layer, PubSub, Semaphore, Stream } from "effect"
 import { makeLocationNode } from "@opencode/util/effect/app-node"
+import { ToolPresentation } from "@opencode/util/tool-presentation"
 import { Bus } from "../bus.js"
 
 import { Mcp } from "../mcp/index.js"
 import { Permission } from "../permission.js"
 import { Tool } from "../tool.js"
+import { ToolProgress } from "./progress.js"
 
 /**
  * Registry namespace and permission action names for MCP tools.
  */
 export const namespace = (server: string) => server.replace(/[^a-zA-Z0-9_-]/g, "_")
 export const name = (server: string, tool: string) => `${namespace(server)}_${tool.replace(/[^a-zA-Z0-9_-]/g, "_")}`
+
+export function presentation(tool: Mcp.Tool): ToolPresentation.Info {
+  const icon = [...(tool.icons ?? []), ...(tool.serverInfo?.icons ?? [])]
+    .map(ToolPresentation.icon)
+    .find((value) => value !== undefined)
+  return {
+    schemaVersion: 1,
+    label:
+      ToolPresentation.text(tool.title) ??
+      ToolPresentation.text(tool.annotations?.title) ??
+      ToolPresentation.text(tool.name),
+    ...(icon ? { icon } : {}),
+  }
+}
 
 export interface Interface {
   /** Wait for the initial MCP tool registration to settle. */
@@ -48,6 +64,9 @@ export const layer = Layer.effect(
                 output: (tool.outputSchema ?? {}) as JsonSchema.JsonSchema,
                 execute: (input, context) =>
                   Effect.gen(function* () {
+                    let shown = presentation(tool)
+                    let active = true
+                    yield* ToolProgress.publish(context, { toolPresentation: shown })
                     yield* permission.assert({
                       action: name(tool.server, tool.name),
                       resources: ["*"],
@@ -67,6 +86,26 @@ export const layer = Layer.effect(
                         name: tool.name,
                         args: (input ?? {}) as Record<string, unknown>,
                         sessionID: context.sessionID,
+                        onProgress: (update) => {
+                          if (!active || (shown.progress && update.progress <= shown.progress.current)) return
+                          const next = ToolPresentation.read({
+                            toolPresentation: {
+                              ...shown,
+                              detail: ToolPresentation.text(update.message) ?? shown.detail,
+                              progress: {
+                                current: update.progress,
+                                ...(update.total === undefined ? {} : { total: update.total }),
+                              },
+                            },
+                          })
+                          if (!next?.progress) return
+                          shown = next
+                          Effect.runFork(
+                            Effect.suspend(() =>
+                              active ? ToolProgress.publish(context, { toolPresentation: next }) : Effect.void,
+                            ),
+                          )
+                        },
                       })
                       .pipe(
                         Effect.catchTags({
@@ -74,7 +113,16 @@ export const layer = Layer.effect(
                             new ToolFailure({ message: `MCP server "${error.server}" is not available` }),
                           "MCP.ToolCallError": (error) => new ToolFailure({ message: error.message }),
                         }),
+                        Effect.ensuring(
+                          Effect.sync(() => {
+                            active = false
+                          }),
+                        ),
                       )
+                    const metadata = {
+                      toolPresentation: shown,
+                      ...(result.meta === undefined ? {} : { mcp: { resultMeta: result.meta } }),
+                    }
                     if (result.isError)
                       return yield* new ToolFailure({
                         message:
@@ -82,6 +130,7 @@ export const layer = Layer.effect(
                             .flatMap((part) => (part.type === "text" ? [part.text] : []))
                             .join("\n")
                             .trim() || "MCP tool returned an error",
+                        metadata,
                       })
                     const content = result.content.map((part) =>
                       part.type === "text"
@@ -107,6 +156,7 @@ export const layer = Layer.effect(
                     return {
                       output: output(),
                       ...(content.length === 0 ? {} : { content }),
+                      metadata,
                     }
                   }).pipe(
                     Effect.mapError((error) =>

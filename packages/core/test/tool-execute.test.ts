@@ -139,8 +139,8 @@ test("execute supports callable namespace tools", async () => {
 
   expect(result.metadata).toEqual({
     toolCalls: [
-      { tool: "slack.admin", status: "completed" },
-      { tool: "slack.admin.create", status: "completed" },
+      { id: "call_execute/0", tool: "slack.admin", status: "completed" },
+      { id: "call_execute/1", tool: "slack.admin.create", status: "completed" },
     ],
   })
   expect(result.content).toEqual([{ type: "text", text: '[\n  "admin",\n  "created"\n]' }])

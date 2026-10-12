@@ -57,6 +57,8 @@ import {
 } from "../message/current-tool-state"
 import { AssistantReasoningContent, writeClipboard } from "../message/message-content"
 import { followShellOutput } from "./shell-output"
+import { ToolPresentation } from "@opencode/util/tool-presentation"
+import { ExecuteToolCalls } from "./execute-tool-calls"
 
 function ShellSubmessage(props: { text: string; animate?: boolean }) {
   let widthRef: HTMLSpanElement | undefined
@@ -572,8 +574,9 @@ export function CurrentContextToolGroup(props: {
                 ? i18n.t("ui.tool.skill")
                 : part.name === "subagent"
                   ? i18n.t("ui.tool.agent.default")
-                  : getToolInfo(part.name, undefined, part.name === "websearch" ? currentToolMetadata(part) : undefined)
-                      .title,
+                  : (ToolPresentation.read(currentToolMetadata(part))?.label ??
+                    getToolInfo(part.name, undefined, part.name === "websearch" ? currentToolMetadata(part) : undefined)
+                      .title),
           ]
         }),
       ),
@@ -691,6 +694,7 @@ export function CurrentContextToolGroup(props: {
     >
       <BasicTool
         icon="glasses"
+        presentation={tools().length === 1 ? ToolPresentation.read(currentToolMetadata(tools()[0]!)) : undefined}
         status={pending() ? "running" : "completed"}
         compact
         hasContent
@@ -1459,6 +1463,7 @@ export function ToolDisplay(
 
   const errorSubtitle = createMemo(() => toolErrorSubtitle(props, i18n))
   const error = createMemo(() => toolDisplayError(props, i18n.t("ui.toolErrorCard.failed")))
+  const presentation = createMemo(() => ToolPresentation.read(props.metadata))
   const render = createMemo(() => ToolRegistry.render(props.tool) ?? GenericTool)
 
   return (
@@ -1480,26 +1485,31 @@ export function ToolDisplay(
               }
 
               return (
-                <ToolErrorCard
-                  tool={props.tool}
-                  error={error()}
-                  title={props.tool === "websearch" ? webSearchProviderLabel(props.metadata.provider, i18n) : undefined}
-                  defaultOpen={props.defaultOpen}
-                  open={props.open}
-                  onOpenChange={props.onOpenChange}
-                  subtitle={taskSubtitle() ?? errorSubtitle()}
-                  href={taskHref()}
-                  onSubtitleClick={(event) => {
-                    if (!data.navigateToSession) return
+                <>
+                  <ToolErrorCard
+                    presentation={presentation()}
+                    tool={props.tool}
+                    error={error()}
+                    title={
+                      props.tool === "websearch" ? webSearchProviderLabel(props.metadata.provider, i18n) : undefined
+                    }
+                    defaultOpen={props.defaultOpen}
+                    open={props.open}
+                    onOpenChange={props.onOpenChange}
+                    subtitle={taskSubtitle() ?? errorSubtitle()}
+                    href={taskHref()}
+                    onSubtitleClick={(event) => {
+                      if (!data.navigateToSession) return
 
-                    if (event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
-                    const id = taskId()
+                      if (event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+                      const id = taskId()
 
-                    if (!id) return
-                    event.preventDefault()
-                    data.navigateToSession(id)
-                  }}
-                />
+                      if (!id) return
+                      event.preventDefault()
+                      data.navigateToSession(id)
+                    }}
+                  />
+                </>
               )
             }}
           </Match>
@@ -1507,6 +1517,9 @@ export function ToolDisplay(
             <Dynamic component={render()} {...props} />
           </Match>
         </Switch>
+        <Show when={props.tool === "execute"}>
+          <ExecuteToolCalls metadata={props.metadata} />
+        </Show>
       </div>
     </Show>
   )
@@ -2031,35 +2044,39 @@ ToolRegistry.register({
     const i18n = useI18n()
     const pending = () => props.status === "streaming" || props.status === "running"
     const code = createMemo(() => (typeof props.input.code === "string" ? props.input.code : ""))
+    const presentation = createMemo(() => ToolPresentation.read(props.metadata))
     const output = () => stripAnsi(props.output ?? "").replace(/\r\n?/g, "\n")
     const sawPending = pending()
 
     return (
-      <BasicTool
-        {...props}
-        icon="console"
-        rail={false}
-        hasContent
-        compact
-        allowOpenWhilePending
-        trigger={(open) => (
-          <div data-slot="basic-tool-tool-info-structured">
-            <div data-slot="basic-tool-tool-info-main">
-              <span data-slot="basic-tool-tool-title">
-                <TextShimmer text={i18n.t("ui.tool.execute")} active={pending()} />
-              </span>
-              <Show when={!open() && code()}>
-                <ShellSubmessage text={code().split("\n", 1)[0]} animate={sawPending} />
-              </Show>
+      <>
+        <BasicTool
+          {...props}
+          icon="console"
+          presentation={presentation()}
+          rail={false}
+          hasContent
+          compact
+          allowOpenWhilePending
+          trigger={(open) => (
+            <div data-slot="basic-tool-tool-info-structured">
+              <div data-slot="basic-tool-tool-info-main">
+                <span data-slot="basic-tool-tool-title">
+                  <TextShimmer text={presentation()?.label ?? i18n.t("ui.tool.execute")} active={pending()} />
+                </span>
+                <Show when={!open() && code()}>
+                  <ShellSubmessage text={code().split("\n", 1)[0]} animate={sawPending} />
+                </Show>
+              </div>
             </div>
-          </div>
-        )}
-      >
-        <ConsoleOutput copy={code()} variant="shell">
-          <span data-slot="bash-command">{code()}</span>
-          <Show when={output()}>{(value) => <span data-slot="bash-result">{value()}</span>}</Show>
-        </ConsoleOutput>
-      </BasicTool>
+          )}
+        >
+          <ConsoleOutput copy={code()} variant="shell">
+            <span data-slot="bash-command">{code()}</span>
+            <Show when={output()}>{(value) => <span data-slot="bash-result">{value()}</span>}</Show>
+          </ConsoleOutput>
+        </BasicTool>
+      </>
     )
   },
 })

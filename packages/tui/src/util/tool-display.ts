@@ -19,7 +19,13 @@ export function primitiveInputSummary(input: Record<string, unknown>, omit: read
   return `[${entries.map(([key, value]) => `${key}=${String(value)}`).join(", ")}]`
 }
 
-export type ExecuteCall = { tool: string; status: "running" | "completed" | "error"; input?: Record<string, unknown> }
+export type ExecuteCall = {
+  id?: string
+  tool: string
+  status: "running" | "completed" | "error"
+  input?: Record<string, unknown>
+  metadata?: Record<string, unknown>
+}
 
 export function executeCalls(value: unknown): ExecuteCall[] {
   if (!Array.isArray(value)) return []
@@ -28,13 +34,38 @@ export function executeCalls(value: unknown): ExecuteCall[] {
     const tool = call.tool
     const status = call.status
     if (typeof tool !== "string" || (status !== "running" && status !== "completed" && status !== "error")) return []
-    return [{ tool, status, input: isRecord(call.input) ? call.input : undefined }]
+    return [
+      {
+        tool,
+        status,
+        input: isRecord(call.input) ? call.input : undefined,
+        ...(typeof call.id === "string" && call.id ? { id: call.id } : {}),
+        ...(isRecord(call.metadata) ? { metadata: call.metadata } : {}),
+      },
+    ]
   })
 }
 
 export function executeCallSummary(call: ExecuteCall) {
   const args = primitiveInputSummary(call.input ?? {}).replace(/\s+/g, " ")
-  return `${call.tool}${args ? ` ${args}` : ""}`
+  return toolPresentationSummary(call.metadata, `${call.tool}${args ? ` ${args}` : ""}`)
+}
+
+export function executeCallKey(call: ExecuteCall, index: number) {
+  return call.id ? `id:${call.id}` : `legacy:${index}`
+}
+
+export function toolPresentationSummary(metadata: unknown, fallback: string) {
+  const presentation = ToolPresentation.read(metadata)
+  if (!presentation) return fallback
+  return [
+    presentation.label ?? fallback,
+    presentation.detail,
+    presentation.progress &&
+      `${presentation.progress.current}${presentation.progress.total === undefined ? "" : ` / ${presentation.progress.total}`}`,
+  ]
+    .filter((value) => value !== undefined)
+    .join(" · ")
 }
 
 export function webSearchProviderName(provider: unknown) {
@@ -68,3 +99,4 @@ export function nonEmptyToolContent<T>(content: ReadonlyArray<T> | undefined): [
 }
 import type { SessionMessageAssistantTool } from "@opencode/client/promise"
 import { isRecord } from "./record"
+import { ToolPresentation } from "@opencode/util/tool-presentation"
